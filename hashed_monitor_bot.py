@@ -27,6 +27,28 @@ def init_db():
             fetched_at TEXT
         )
     """)
+    # ✅ 추가: meta 테이블 (워밍업 완료 여부 저장)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def get_meta(key):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM meta WHERE key = ?", (key,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def set_meta(key, value):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
     conn.commit()
     conn.close()
 
@@ -232,6 +254,8 @@ def fetch_gdelt(query: str, max_records=50, retries=3):
 def run():
     init_db()
     fetched_at = datetime.now(timezone.utc).isoformat()
+    
+    bootstrapped = get_meta("bootstrapped") == "1"
 
     combined_query = "(" + " OR ".join([f'"{k}"' for k in KEYWORDS]) + ")"
 
@@ -253,12 +277,23 @@ def run():
 
     if new_mentions:
         print(f"✅ New mentions: {len(new_mentions)}")
-        # 폭주 방지: 한 번에 최대 10개만 전송
+
+        if not bootstrapped:
+            # ✅ 첫 실행: 알림 보내지 않고 DB만 채우기
+            print("🧊 First run bootstrap mode: saving mentions without Slack notifications.")
+            set_meta("bootstrapped", "1")
+            return
+
         for m in new_mentions[:10]:
             print(f"[{m['source']}] {m['title']} - {m['url']}")
             slack_post_mention(channel_id, m)
     else:
         print("No new mentions.")
+
+    # ✅ 실행이 끝났으면 bootstrapped 표시 (혹시 new_mentions가 0이어도 첫 실행이라면 켜주기)
+    if not bootstrapped:
+        set_meta("bootstrapped", "1")
+
 
 if __name__ == "__main__":
     run()
