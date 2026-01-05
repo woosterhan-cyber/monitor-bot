@@ -155,7 +155,7 @@ def fetch_google_news_rss(query: str):
         })
     return results
 
-def fetch_gdelt(query: str, max_records=50):
+def fetch_gdelt(query: str, max_records=50, retries=3):
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
     params = {
         "query": query,
@@ -165,27 +165,66 @@ def fetch_gdelt(query: str, max_records=50):
         "sort": "HybridRel"
     }
 
-    r = requests.get(url, params=params, timeout=20)
-    r.raise_for_status()
-    data = r.json()
+    headers = {
+        "User-Agent": "HashedMonitorBot/1.0 (contact: wooster@hashed.com)"
+    }
 
-    results = []
-    for item in data.get("articles", []):
-        title = item.get("title", "")
-        link = item.get("url", "")
-        seendate = item.get("seendate")
-        if seendate:
-            published_dt = datetime.strptime(seendate, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-        else:
-            published_dt = datetime.now(timezone.utc)
+    last_err = None
 
-        results.append({
-            "source": "GDELT",
-            "title": title,
-            "url": link,
-            "published_at": published_dt.isoformat(),
-        })
-    return results
+    for attempt in range(1, retries + 1):
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=20)
+
+            # ✅ HTTP 에러면 바로 처리
+            if r.status_code != 200:
+                last_err = f"GDELT HTTP {r.status_code}"
+                print(f"[GDELT] attempt {attempt}/{retries} failed: {last_err}")
+                continue
+
+            # ✅ 응답이 비어있거나 JSON이 아닐 때 방어
+            if not r.text or len(r.text.strip()) == 0:
+                last_err = "GDELT empty response"
+                print(f"[GDELT] attempt {attempt}/{retries} failed: {last_err}")
+                continue
+
+            ctype = r.headers.get("Content-Type", "")
+            if "application/json" not in ctype:
+                # 가끔 HTML이 올 때가 있음
+                last_err = f"GDELT non-json content-type: {ctype}"
+                print(f"[GDELT] attempt {attempt}/{retries} failed: {last_err}")
+                # 디버깅용으로 앞부분만 출력 (로그 너무 길어지지 않게)
+                print("[GDELT] response head:", r.text[:200])
+                continue
+
+            data = r.json()
+
+            results = []
+            for item in data.get("articles", []):
+                title = item.get("title", "")
+                link = item.get("url", "")
+                seendate = item.get("seendate")
+                if seendate:
+                    published_dt = datetime.strptime(seendate, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+                else:
+                    published_dt = datetime.now(timezone.utc)
+
+                results.append({
+                    "source": "GDELT",
+                    "title": title,
+                    "url": link,
+                    "published_at": published_dt.isoformat(),
+                })
+
+            return results
+
+        except Exception as e:
+            last_err = str(e)
+            print(f"[GDELT] attempt {attempt}/{retries} exception: {last_err}")
+
+    # ✅ 여기까지 오면 GDELT가 계속 실패한 것 — 크롤러 전체를 죽이지 말고 빈 리스트 반환
+    print(f"[GDELT] giving up after {retries} attempts. last_err={last_err}")
+    return []
+
 
 # -------------------------
 # Main
@@ -222,3 +261,8 @@ def run():
 
 if __name__ == "__main__":
     run()
+try:
+    all_results += fetch_gdelt(combined_query)
+except Exception as e:
+    print("GDELT fetch failed:", e)
+
