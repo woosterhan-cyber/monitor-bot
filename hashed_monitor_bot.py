@@ -233,7 +233,8 @@ def run():
     init_db()
     fetched_at = datetime.now(timezone.utc).isoformat()
 
-    combined_query = " OR ".join([f'"{k}"' for k in KEYWORDS])
+    combined_query = "(" + " OR ".join([f'"{k}"' for k in KEYWORDS]) + ")"
+
 
     all_results = []
     all_results += fetch_google_news_rss(combined_query)
