@@ -182,7 +182,7 @@ def run():
         raise RuntimeError("SLACK_CHANNEL is missing. Use channel ID like C0123... recommended.")
 
     # ✅ OR 괄호 포함 (GDELT 문법)
-    combined_query = "(" + " OR ".join([f'"{k}"' for k in KEYWORDS]) + ")"
+    combined_query = '(("Hashed" AND ("digital asset" OR crypto OR web3 OR blockchain)) OR "해시드")'
 
     # 1) Fetch
     all_results = []
